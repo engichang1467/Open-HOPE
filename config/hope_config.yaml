@@ -1,0 +1,26 @@
+model:
+  dim: 768
+  depth: 12
+  vocab_size: 50257
+  num_heads: 12
+  max_seq_len: 1024
+
+cms:
+  # Define levels (Low to High frequency)
+  # Frequencies are relative to the unit time step
+  levels:
+    - name: "level_1"
+      frequency: 1       # Updates every step (High Freq)
+      chunk_size: 16
+    - name: "level_2"
+      frequency: 16      # Updates every 16 steps
+      chunk_size: 1000   # 1M in paper, scaled down for testing
+    - name: "level_3"
+      frequency: 1000    # Updates rarely (Low Freq)
+      chunk_size: 0      # 0 implies rarely updated (Pre-training knowledge)
+
+training:
+  batch_size: 8
+  learning_rate: 1e-4
+  num_epochs: 1 #3
+  gradient_accumulation_steps: 4
