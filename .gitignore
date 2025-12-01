@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Lightning logs
+lightning_logs/
+
 # Model file
 *.pth
 
