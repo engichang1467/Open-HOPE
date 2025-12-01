@@ -68,6 +68,8 @@ To train the HOPE model on Wikitext:
 python train.py --config config/hope_config.yaml --dataset wikitext-103
 ```
 
+**Note**: If you are using a less powerful computer, then you can use `config/hope_mini_config.yaml` to train.
+
 ## Key Architectural Differences
 
 When implementing `src/models/hope.py`, ensure you distinguish it from a standard Transformer:

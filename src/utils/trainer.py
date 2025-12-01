@@ -103,10 +103,15 @@ class MultiFrequencyTrainer:
     def train(self, dataloader, num_epochs):
         self.model.train()
         global_step = 0
+
+        # 1. Get accumulation steps from config
+        accum_steps = self.config['training']['gradient_accumulation_steps']
         
         for epoch in range(num_epochs):
             progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}")
-            for batch in progress_bar:
+            
+            # 2. Use enumerate to track batch index
+            for batch_idx, batch in enumerate(progress_bar):
                 batch = batch.to(self.device)
                 
                 # Forward pass
@@ -122,24 +127,29 @@ class MultiFrequencyTrainer:
                 
                 loss_fct = nn.CrossEntropyLoss()
                 loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+                # 3. Normalize loss
+                loss = loss / accum_steps
                 
                 # Backward
                 loss.backward()
                 
-                # Update parameters based on frequency
-                global_step += 1
-                
-                for freq, optimizer in self.optimizers.items():
-                    if global_step % freq == 0:
-                        optimizer.step()
-                        optimizer.zero_grad()
-                    else:
-                        # For parameters not updating, we should probably zero their grads 
-                        # to prevent accumulation? 
-                        # Or we just let them accumulate and step later?
-                        # "Gradient accumulation" is usually a feature.
-                        # If we want strict "update every k steps", accumulation is natural.
-                        # So we do NOTHING here.
-                        pass
+                # 4. Step only after accumulation
+                if (batch_idx + 1) % accum_steps == 0:
+                    # Update parameters based on frequency
+                    global_step += 1
+                    
+                    for freq, optimizer in self.optimizers.items():
+                        if global_step % freq == 0:
+                            optimizer.step()
+                            optimizer.zero_grad()
+                        else:
+                            # For parameters not updating, we should probably zero their grads 
+                            # to prevent accumulation? 
+                            # Or we just let them accumulate and step later?
+                            # "Gradient accumulation" is usually a feature.
+                            # If we want strict "update every k steps", accumulation is natural.
+                            # So we do NOTHING here.
+                            pass
                         
-                progress_bar.set_postfix({'loss': loss.item()})
+                progress_bar.set_postfix({'loss': loss.item() * accum_steps})
