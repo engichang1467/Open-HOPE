@@ -57,4 +57,4 @@ def get_data_loader(dataset_name, batch_size, max_seq_len, split='train', limit=
     
     ds = TextDataset(texts, tokenizer, max_seq_len, limit)
     
-    return DataLoader(ds, batch_size=batch_size, shuffle=(split=='train'), drop_last=True)
+    return DataLoader(ds, batch_size=batch_size, shuffle=(split=='train'), drop_last=True, num_workers=4)
