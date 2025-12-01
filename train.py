@@ -9,6 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train HOPE model")
     parser.add_argument("--config", type=str, required=True, help="Path to config file")
     parser.add_argument("--dataset", type=str, default="wikitext-2", help="Dataset name")
+    parser.add_argument("--limit", type=int, default=1024, help="Limit dataset size for debugging")
     args = parser.parse_args()
     
     # Load config
@@ -27,7 +28,8 @@ def main():
     dataloader = get_data_loader(
         args.dataset, 
         config['training']['batch_size'], 
-        config['model']['max_seq_len']
+        config['model']['max_seq_len'],
+        limit=args.limit
     )
     
     # Trainer
