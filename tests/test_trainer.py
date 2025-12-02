@@ -33,26 +33,18 @@ class MockCMSModule(nn.Module):
 #     def forward(self, x):
 #         return x
 
-class MockLayer(nn.Module):
-    """Mock layer that contains CMS and other components"""
-    def __init__(self):
-        super().__init__()
-        self.cms = MockCMSModule(num_levels=2)
-        self.norm = nn.LayerNorm(64)
-        self.attention = nn.Linear(64, 64)
-    
-    def forward(self, x):
-        return x
-
-
 class MockHOPEModel(nn.Module):
     """Mock HOPE model for testing"""
     def __init__(self, num_layers=2):
         super().__init__()
         self.embedding = nn.Embedding(1000, 64)
-        # Create proper PyTorch modules instead of dictionaries
+        # Create proper PyTorch modules using ModuleDict to match production code
         self.layers = nn.ModuleList([
-            MockLayer() for _ in range(num_layers)
+            nn.ModuleDict({
+                'cms': MockCMSModule(num_levels=2),
+                'norm': nn.LayerNorm(64),
+                'attention': nn.Linear(64, 64)
+            }) for _ in range(num_layers)
         ])
         self.final_norm = nn.LayerNorm(64)
         self.lm_head = nn.Linear(64, 1000)
@@ -61,7 +53,7 @@ class MockHOPEModel(nn.Module):
         # Simple forward pass for testing
         x = self.embedding(x)
         for layer in self.layers:
-            x = layer.norm(x)
+            x = layer['norm'](x)
         x = self.final_norm(x)
         return self.lm_head(x)
 
@@ -107,7 +99,8 @@ def mock_config():
             ]
         },
         'training': {
-            'learning_rate': '1e-4'
+            'learning_rate': '1e-4',
+            'gradient_accumulation_steps': 1
         }
     }
 
