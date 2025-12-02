@@ -3,6 +3,61 @@ import torch.nn as nn
 from tqdm import tqdm
 from src.optimizers.deep_opt import DeepMomentumOptimizer
 
+class DeepMomentumWrapper(torch.optim.Optimizer):
+    """
+    Wrapper to make DeepMomentumOptimizer compatible with torch.optim.Optimizer.
+    Applies DeepMomentumOptimizer coordinate-wise (param_dim=1).
+    """
+    def __init__(self, params, hidden_dim=64, alpha=0.9, eta=1e-3, device='cpu'):
+        defaults = dict(hidden_dim=hidden_dim, alpha=alpha, eta=eta, device=device)
+        super().__init__(params, defaults)
+        
+        # Initialize the Deep Optimizer module
+        # We use a single shared optimizer module for all parameters (coordinate-wise)
+        self.deep_opt = DeepMomentumOptimizer(param_dim=1, hidden_dim=hidden_dim, alpha=alpha, eta=eta)
+        self.deep_opt.to(device)
+        
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+            
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                grad = p.grad.data
+                state = self.state[p]
+                
+                # Get momentum state
+                if 'momentum' not in state:
+                    state['momentum'] = torch.zeros_like(p.data)
+                    
+                m_prev = state['momentum']
+                
+                # Prepare inputs for Deep Optimizer
+                # Flatten to [N, 1] for coordinate-wise processing
+                grad_flat = grad.view(-1, 1)
+                m_prev_flat = m_prev.view(-1, 1)
+                
+                # Deep Optimizer Step
+                # We use no_grad for the outer update application, 
+                # but DeepMomentumOptimizer handles its own autograd internally if needed.
+                # However, since we are updating model weights, we usually don't need to track 
+                # gradients of the update step itself unless we are meta-learning.
+                # The DeepMomentumOptimizer.forward uses enable_grad() internally for its energy calculation.
+                update_flat, m_next_flat = self.deep_opt(grad_flat, m_prev_flat)
+                
+                # Update State
+                state['momentum'] = m_next_flat.view_as(p.data)
+                
+                # Update Parameters
+                # W_{i+1} = W_i + m_{i+1}
+                p.data.add_(state['momentum'])
+                
+        return loss
+
 class MultiFrequencyTrainer:
     """
     Trainer that handles Multi-Time Scale Updates.
@@ -19,18 +74,22 @@ class MultiFrequencyTrainer:
         self.param_groups = self._group_parameters()
         
         # Initialize optimizers for each group
-        lr = float(config['training']['learning_rate'])
+        # lr = float(config['training']['learning_rate']) # Not used by DMGD directly in this formulation, but could be eta
+        
+        # DMGD Hyperparameters
+        # We can pull these from config if available, otherwise defaults
+        alpha = 0.9
+        eta = float(config['training']['learning_rate']) # Use LR as eta for the energy gradient step
+        
         for freq, params in self.param_groups.items():
             if params:
-                # We use AdamW as the base optimizer for now, 
-                # or we could use the DeepMomentumOptimizer if we fully implemented it as a torch.optim.Optimizer.
-                # The DeepMomentumOptimizer in src/optimizers/deep_opt.py is an nn.Module, 
-                # which implies it's part of the model or a custom update rule.
-                # For simplicity and stability in this demo, we'll use AdamW,
-                # but we acknowledge the paper uses DMGD.
-                # To use DMGD properly, we'd need to write a custom loop that calls it.
-                # Let's stick to standard optimizers for the "outer" loop but respect frequencies.
-                self.optimizers[freq] = torch.optim.AdamW(params, lr=lr)
+                # Replace AdamW with DeepMomentumWrapper
+                self.optimizers[freq] = DeepMomentumWrapper(
+                    params, 
+                    alpha=alpha, 
+                    eta=eta, 
+                    device=device
+                )
                 
     def _group_parameters(self):
         """
