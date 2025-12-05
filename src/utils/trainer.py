@@ -81,15 +81,18 @@ class MultiFrequencyTrainer:
         alpha = 0.9
         eta = float(config['training']['learning_rate']) # Use LR as eta for the energy gradient step
         
-        for freq, params in self.param_groups.items():
+        for chunk_size, params in self.param_groups.items():
             if params:
                 # Replace AdamW with DeepMomentumWrapper
-                self.optimizers[freq] = DeepMomentumWrapper(
+                self.optimizers[chunk_size] = DeepMomentumWrapper(
                     params, 
                     alpha=alpha, 
                     eta=eta, 
                     device=device
                 )
+                
+        # Initialize global step counter
+        self.global_step = 0
                 
     def _group_parameters(self):
         """
@@ -108,13 +111,13 @@ class MultiFrequencyTrainer:
         # We'll maintain a set of parameter IDs to avoid duplicates (though we shouldn't have any).
         assigned_params = set()
         
-        for freq_config in cms_levels:
-            freq = freq_config['frequency']
-            if freq not in groups:
-                groups[freq] = []
+        for level_config in cms_levels:
+            chunk_size = level_config['chunk_size']
+            if chunk_size not in groups:
+                groups[chunk_size] = []
                 
-        # Default frequency for non-CMS parameters (e.g. Titans, Embeddings, Norms)
-        # Usually these are high frequency (freq=1).
+        # Default chunk_size for non-CMS parameters (e.g. Titans, Embeddings, Norms)
+        # Usually these are high frequency (chunk_size=1).
         if 1 not in groups:
             groups[1] = []
             
@@ -123,17 +126,17 @@ class MultiFrequencyTrainer:
             # CMS
             cms_module = layer['cms']
             for i, level_config in enumerate(cms_levels):
-                freq = level_config['frequency']
+                chunk_size = level_config['chunk_size']
                 # The CMS module has a list of layers corresponding to levels
                 # We assume cms.layers[i] corresponds to levels[i]
                 if i < len(cms_module.layers):
                     mlp = cms_module.layers[i]
                     for p in mlp.parameters():
-                        groups[freq].append(p)
+                        groups[chunk_size].append(p)
                         assigned_params.add(id(p))
                         
-            # Titans & Norms (Freq 1)
-            # Add everything else in the layer to Freq 1
+            # Titans & Norms (Freq 1 / Chunk Size 1)
+            # Add everything else in the layer to Chunk Size 1
             for name, submodule in layer.named_children():
                 if name != 'cms':
                     for p in submodule.parameters():
@@ -161,7 +164,6 @@ class MultiFrequencyTrainer:
 
     def train(self, dataloader, num_epochs):
         self.model.train()
-        global_step = 0
 
         # 1. Get accumulation steps from config
         accum_steps = self.config['training']['gradient_accumulation_steps']
@@ -195,20 +197,18 @@ class MultiFrequencyTrainer:
                 
                 # 4. Step only after accumulation
                 if (batch_idx + 1) % accum_steps == 0:
-                    # Update parameters based on frequency
-                    global_step += 1
+                    # Update parameters based on chunk size
+                    self.global_step += 1
                     
-                    for freq, optimizer in self.optimizers.items():
-                        if global_step % freq == 0:
+                    for chunk_size, optimizer in self.optimizers.items():
+                        # Case 1: Update Occurs (Synchronization Point)
+                        # If chunk_size > 0 and global_step is a multiple of chunk_size
+                        if chunk_size > 0 and self.global_step % chunk_size == 0:
                             optimizer.step()
                             optimizer.zero_grad()
+                        # Case 2: No Update Occurs (Between Synchronization Points)
+                        # Gradients accumulate.
                         else:
-                            # For parameters not updating, we should probably zero their grads 
-                            # to prevent accumulation? 
-                            # Or we just let them accumulate and step later?
-                            # "Gradient accumulation" is usually a feature.
-                            # If we want strict "update every k steps", accumulation is natural.
-                            # So we do NOTHING here.
                             pass
                         
                 progress_bar.set_postfix({'loss': loss.item() * accum_steps})

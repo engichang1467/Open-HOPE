@@ -48,13 +48,13 @@ class CMS(nn.Module):
             
         return out
 
-    def get_parameters_by_frequency(self, current_step):
+    def get_parameters_by_chunk_size(self, current_step):
         """
         Returns parameters that should be updated at the current step.
         """
         params_to_update = []
         for i, level in enumerate(self.levels_config):
-            freq = level['frequency']
-            if current_step % freq == 0:
+            chunk_size = level['chunk_size']
+            if chunk_size > 0 and current_step % chunk_size == 0:
                 params_to_update.extend(self.layers[i].parameters())
         return params_to_update
