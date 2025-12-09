@@ -22,17 +22,6 @@ class MockCMSModule(nn.Module):
         return x
 
 
-# class MockTransformerLayer(nn.Module):
-#     """Mock transformer layer for testing"""
-#     def __init__(self):
-#         super().__init__()
-#         self.cms = MockCMSModule(num_levels=2)
-#         self.norm = nn.LayerNorm(64)
-#         self.attention = nn.Linear(64, 64)
-    
-#     def forward(self, x):
-#         return x
-
 class MockHOPEModel(nn.Module):
     """Mock HOPE model for testing"""
     def __init__(self, num_layers=2):
@@ -57,45 +46,15 @@ class MockHOPEModel(nn.Module):
         x = self.final_norm(x)
         return self.lm_head(x)
 
-# class MockHOPEModel(nn.Module):
-#     """Mock HOPE model for testing"""
-#     def __init__(self, num_layers=2):
-#         super().__init__()
-#         self.embedding = nn.Embedding(1000, 64)
-#         self.layers = nn.ModuleList([
-#             {'cms': MockCMSModule(num_levels=2), 'norm': nn.LayerNorm(64)}
-#             for _ in range(num_layers)
-#         ])
-#         self.final_norm = nn.LayerNorm(64)
-#         self.lm_head = nn.Linear(64, 1000)
-    
-#     def forward(self, x):
-#         # Simple forward pass for testing
-#         x = self.embedding(x)
-#         for layer in self.layers:
-#             x = layer['norm'](x)
-#         x = self.final_norm(x)
-#         return self.lm_head(x)
-    
-#     def named_children(self):
-#         # Mock the named_children method that trainer uses
-#         return [
-#             ('embedding', self.embedding),
-#             ('layers', self.layers),
-#             ('final_norm', self.final_norm),
-#             ('lm_head', self.lm_head)
-#         ]
-
-
 
 @pytest.fixture
 def mock_config():
-    """Test configuration"""
+    """Test configuration matching production structure"""
     return {
         'cms': {
             'levels': [
-                {'frequency': 1, 'dimension': 64},
-                {'frequency': 4, 'dimension': 64}
+                {'frequency': 1, 'chunk_size': 16, 'dimension': 64},
+                {'frequency': 4, 'chunk_size': 256, 'dimension': 64}
             ]
         },
         'training': {
@@ -109,20 +68,6 @@ def mock_config():
 def mock_model():
     """Mock model for testing"""
     model = MockHOPEModel(num_layers=2)
-    
-    # # Manually set up the layers structure that trainer expects
-    # for i, layer_dict in enumerate(model.layers):
-    #     # Create a mock object that has named_children method
-    #     layer_mock = MagicMock()
-    #     layer_mock.named_children.return_value = [
-    #         ('cms', layer_dict['cms']),
-    #         ('norm', layer_dict['norm'])
-    #     ]
-    #     # Replace the dict with our mock
-    #     model.layers[i] = layer_mock
-    #     # Add cms as an attribute for direct access
-    #     model.layers[i].cms = layer_dict['cms']
-    
     return model
 
 

@@ -48,13 +48,20 @@ class CMS(nn.Module):
             
         return out
 
-    def get_parameters_by_chunk_size(self, current_step):
+    def get_parameters_by_frequency(self, current_step):
         """
         Returns parameters that should be updated at the current step.
+        Based on update FREQUENCY (not chunk_size).
+        
+        Args:
+            current_step: Global training step counter
+            
+        Returns:
+            List of parameters eligible for update at this step
         """
         params_to_update = []
         for i, level in enumerate(self.levels_config):
-            chunk_size = level['chunk_size']
-            if chunk_size > 0 and current_step % chunk_size == 0:
+            frequency = level['frequency']  # Use frequency, not chunk_size
+            if frequency > 0 and current_step % frequency == 0:
                 params_to_update.extend(self.layers[i].parameters())
         return params_to_update

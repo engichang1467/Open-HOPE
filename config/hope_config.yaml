@@ -6,18 +6,19 @@ model:
   max_seq_len: 1024
 
 cms:
-  # Define levels (Low to High frequency)
-  # Frequencies are relative to the unit time step
+  # Define levels for Multi-Time Scale Updates (Nested Learning Paradigm)
+  # IMPORTANT: 'frequency' determines update intervals (e.g., frequency: 16 means update every 16 steps)
+  # 'chunk_size' is for CMS context window purposes (separate from update logic)
   levels:
     - name: "level_1"
-      frequency: 1       # Updates every step (High Freq)
-      chunk_size: 16
+      frequency: 1       # Updates EVERY step (high frequency parameters)
+      chunk_size: 16     # CMS context chunk size
     - name: "level_2"
-      frequency: 16      # Updates every 16 steps
-      chunk_size: 1000   # 1M in paper, scaled down for testing
+      frequency: 16      # Updates every 16 steps (mid frequency parameters)
+      chunk_size: 1000   # CMS context chunk size (1M in paper, scaled down)
     - name: "level_3"
-      frequency: 1000    # Updates rarely (Low Freq)
-      chunk_size: 0      # 0 implies rarely updated (Pre-training knowledge)
+      frequency: 1000    # Updates every 1000 steps (low frequency parameters)
+      chunk_size: 0      # Rarely updated (pre-training knowledge)
 
 training:
   batch_size: 8
