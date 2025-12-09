@@ -60,8 +60,18 @@ class DeepMomentumWrapper(torch.optim.Optimizer):
 
 class MultiFrequencyTrainer:
     """
-    Trainer that handles Multi-Time Scale Updates.
-    Parameters are grouped by their update frequency.
+    Trainer that handles Multi-Time Scale Updates for Nested Learning Paradigm.
+    
+    Parameters are grouped by their update frequency (not chunk_size).
+    Each group updates only when global_step % frequency == 0.
+    
+    For example:
+    - frequency=1: Updates every step (high frequency)
+    - frequency=16: Updates every 16 steps (mid frequency) 
+    - frequency=1000: Updates every 1000 steps (low frequency)
+    
+    This implements the strict multi-time scale update logic where:
+    θ^(f_ℓ) is updated only when i ≡ 0 (mod f_ℓ)
     """
     def __init__(self, model, config, device):
         self.model = model
@@ -69,22 +79,20 @@ class MultiFrequencyTrainer:
         self.device = device
         self.model.to(device)
         
-        # Group parameters by frequency
+        # Group parameters by UPDATE FREQUENCY (not chunk_size)
+        # This is critical for Multi-Time Scale Updates
         self.optimizers = {}
         self.param_groups = self._group_parameters()
         
-        # Initialize optimizers for each group
-        # lr = float(config['training']['learning_rate']) # Not used by DMGD directly in this formulation, but could be eta
-        
+        # Initialize optimizers for each frequency group
         # DMGD Hyperparameters
-        # We can pull these from config if available, otherwise defaults
         alpha = 0.9
-        eta = float(config['training']['learning_rate']) # Use LR as eta for the energy gradient step
+        eta = float(config['training']['learning_rate'])
         
-        for chunk_size, params in self.param_groups.items():
+        for frequency, params in self.param_groups.items():
             if params:
-                # Replace AdamW with DeepMomentumWrapper
-                self.optimizers[chunk_size] = DeepMomentumWrapper(
+                # Create optimizer for this frequency group
+                self.optimizers[frequency] = DeepMomentumWrapper(
                     params, 
                     alpha=alpha, 
                     eta=eta, 
@@ -96,47 +104,46 @@ class MultiFrequencyTrainer:
                 
     def _group_parameters(self):
         """
-        Groups parameters based on the CMS levels and other components.
+        Groups parameters based on UPDATE FREQUENCY (not chunk_size).
+        
+        Returns:
+            dict: {frequency: [parameters]} mapping
+                  e.g., {1: [...], 16: [...], 1000: [...]}
         """
         groups = {}
         
-        # 1. CMS Parameters (Explicit frequencies)
+        # 1. CMS Parameters - group by FREQUENCY
         cms_levels = self.config['cms']['levels']
         
-        # We need to traverse the model and find which parameters belong to which CMS level.
-        # This is tricky because parameters are just tensors.
-        # We can rely on the model structure.
-        
-        # Let's iterate over modules.
-        # We'll maintain a set of parameter IDs to avoid duplicates (though we shouldn't have any).
+        # Track assigned parameters to avoid duplicates
         assigned_params = set()
         
+        # Initialize groups for all defined frequencies
         for level_config in cms_levels:
-            chunk_size = level_config['chunk_size']
-            if chunk_size not in groups:
-                groups[chunk_size] = []
+            frequency = level_config['frequency']  # USE FREQUENCY, not chunk_size
+            if frequency not in groups:
+                groups[frequency] = []
                 
-        # Default chunk_size for non-CMS parameters (e.g. Titans, Embeddings, Norms)
-        # Usually these are high frequency (chunk_size=1).
+        # Default frequency for non-CMS parameters (e.g. Titans, Embeddings, Norms)
+        # These are high frequency components that update every step
         if 1 not in groups:
             groups[1] = []
             
         # Iterate through model layers
         for layer in self.model.layers:
-            # CMS
+            # CMS - assign each level's parameters to its frequency group
             cms_module = layer['cms']
             for i, level_config in enumerate(cms_levels):
-                chunk_size = level_config['chunk_size']
+                frequency = level_config['frequency']  # USE FREQUENCY
                 # The CMS module has a list of layers corresponding to levels
-                # We assume cms.layers[i] corresponds to levels[i]
+                # cms.layers[i] corresponds to levels[i]
                 if i < len(cms_module.layers):
                     mlp = cms_module.layers[i]
                     for p in mlp.parameters():
-                        groups[chunk_size].append(p)
+                        groups[frequency].append(p)
                         assigned_params.add(id(p))
                         
-            # Titans & Norms (Freq 1 / Chunk Size 1)
-            # Add everything else in the layer to Chunk Size 1
+            # Titans & Norms - always frequency 1 (update every step)
             for name, submodule in layer.named_children():
                 if name != 'cms':
                     for p in submodule.parameters():
@@ -144,7 +151,7 @@ class MultiFrequencyTrainer:
                             groups[1].append(p)
                             assigned_params.add(id(p))
                             
-        # Global parameters (Embeddings, Final Norm, Head)
+        # Global parameters (Embeddings, Final Norm, Head) - frequency 1
         for p in self.model.embedding.parameters():
             if id(p) not in assigned_params:
                 groups[1].append(p)
@@ -197,18 +204,19 @@ class MultiFrequencyTrainer:
                 
                 # 4. Step only after accumulation
                 if (batch_idx + 1) % accum_steps == 0:
-                    # Update parameters based on chunk size
+                    # Increment global step for multi-time scale tracking
                     self.global_step += 1
                     
-                    for chunk_size, optimizer in self.optimizers.items():
-                        # Case 1: Update Occurs (Synchronization Point)
-                        # If chunk_size > 0 and global_step is a multiple of chunk_size
-                        if chunk_size > 0 and self.global_step % chunk_size == 0:
+                    # STRICT MULTI-TIME SCALE UPDATE LOGIC
+                    # Update parameters based on their UPDATE FREQUENCY
+                    # θ^(f_ℓ) updates only when global_step ≡ 0 (mod f_ℓ)
+                    for frequency, optimizer in self.optimizers.items():
+                        # Synchronization Point Check: Does this frequency update now?
+                        if frequency > 0 and self.global_step % frequency == 0:
+                            # YES: Apply accumulated gradients and update parameters
                             optimizer.step()
                             optimizer.zero_grad()
-                        # Case 2: No Update Occurs (Between Synchronization Points)
-                        # Gradients accumulate.
-                        else:
-                            pass
+                        # else: NO update - gradients continue to accumulate
+                        # This is intentional for multi-time scale learning
                         
                 progress_bar.set_postfix({'loss': loss.item() * accum_steps})

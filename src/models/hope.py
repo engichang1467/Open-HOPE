@@ -52,7 +52,14 @@ class HOPE(nn.Module):
     
     def get_cms_parameters_by_frequency(self, current_step):
         """
-        Collects parameters from all CMS modules that need update.
+        Collects parameters from all CMS modules that need update at current_step.
+        Based on update FREQUENCY.
+        
+        Args:
+            current_step: Global training step counter
+            
+        Returns:
+            List of all CMS parameters eligible for update
         """
         params = []
         for layer in self.layers:
